@@ -168,13 +168,16 @@ public:
     volatile OpenThermStatus status;
     void begin(void (*handleInterruptCallback)(void));
     void begin(void (*handleInterruptCallback)(void), void (*processResponseCallback)(unsigned long, OpenThermResponseStatus));
+#ifdef ESP32
+    void begin(void (*handleInterruptCallback)(void), void (*processResponseCallback)(unsigned long, OpenThermResponseStatus), uint8_t numTimer, void (*timerCb)(void));
+#endif
 #if !defined(__AVR__)
     void begin();
     void begin(std::function<void(unsigned long, OpenThermResponseStatus)> processResponseFunction);
 #endif
     bool isReady();
     unsigned long sendRequest(unsigned long request);
-    bool sendResponse(unsigned long request);
+    bool sendResponse(unsigned long response);
     bool sendRequestAsync(unsigned long request);
     [[deprecated("Use OpenTherm::sendRequestAsync(unsigned long) instead")]]
     bool sendRequestAync(unsigned long request) {
@@ -188,6 +191,9 @@ public:
     void handleInterrupt();
 #if !defined(__AVR__)
     static void handleInterruptHelper(void* ptr);
+#endif
+#ifdef ESP32
+    void handleTimerIrq();
 #endif
     void process();
     void end();
@@ -236,12 +242,19 @@ private:
     volatile unsigned long responseTimestamp;
     volatile byte responseBitIndex;
 
+#ifdef ESP32
+    hw_timer_t *timer;
+    uint8_t txbuf[5];
+    uint8_t txpos;
+#endif
+
     int readState();
     void setActiveState();
     void setIdleState();
     void activateBoiler();
 
     void sendBit(bool high);
+    void sendFrame(const unsigned long msg);
     void processResponse();
     void (*processResponseCallback)(unsigned long, OpenThermResponseStatus);
 #if !defined(__AVR__)

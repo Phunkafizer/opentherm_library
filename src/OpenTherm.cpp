@@ -62,6 +62,18 @@ void OpenTherm::begin(std::function<void(unsigned long, OpenThermResponseStatus)
 }
 #endif
 
+#ifdef ESP32
+void OpenTherm::begin(void (*handleInterruptCallback)(void), void (*processResponseCallback)(unsigned long, OpenThermResponseStatus), uint8_t numTimer, void (*timerCb)(void)) {
+    begin(handleInterruptCallback, processResponseCallback);
+
+    timer = timerBegin(numTimer, 80, true);
+    timerStop(timer);
+    timerAttachInterrupt(timer, timerCb, true);
+    timerAlarmWrite(timer, 500, true);
+    timerAlarmEnable(timer);
+}
+#endif
+
 bool IRAM_ATTR OpenTherm::isReady()
 {
     return status == OpenThermStatus::READY;
@@ -102,6 +114,26 @@ void OpenTherm::sendBit(bool high)
     delayMicroseconds(500);
 }
 
+void OpenTherm::sendFrame(const unsigned long msg) {
+#ifdef ESP32
+    txpos = 0;
+    txbuf[0] = 0x80 | (msg >> 25);
+    txbuf[1] = msg >> 17;
+    txbuf[2] = msg >> 9;
+    txbuf[3] = msg >> 1;
+    txbuf[4] = ((msg << 7) & 0x80) | 0x40;
+    timerStart(timer);
+#else
+    sendBit(HIGH); // start bit
+    for (int i = 31; i >= 0; i--)
+    {
+        sendBit(bitRead(msg, i));
+    }
+    sendBit(HIGH); // stop bit
+    setIdleState();
+#endif
+}
+
 bool OpenTherm::sendRequestAsync(unsigned long request)
 {
     noInterrupts();
@@ -127,13 +159,7 @@ bool OpenTherm::sendRequestAsync(unsigned long request)
 
     interrupts();
 
-    sendBit(HIGH); // start bit
-    for (int i = 31; i >= 0; i--)
-    {
-        sendBit(bitRead(request, i));
-    }
-    sendBit(HIGH); // stop bit
-    setIdleState();
+    sendFrame(request);
 
     responseTimestamp = micros();
     status = OpenThermStatus::RESPONSE_WAITING;
@@ -162,7 +188,7 @@ unsigned long OpenTherm::sendRequest(unsigned long request)
     return response;
 }
 
-bool OpenTherm::sendResponse(unsigned long request)
+bool OpenTherm::sendResponse(unsigned long response)
 {
     noInterrupts();
     const bool ready = isReady();
@@ -174,7 +200,7 @@ bool OpenTherm::sendResponse(unsigned long request)
     }
 
     status = OpenThermStatus::REQUEST_SENDING;
-    response = 0;
+    this->response = 0;
     responseStatus = OpenThermResponseStatus::NONE;
 
 #ifdef INC_FREERTOS_H
@@ -186,14 +212,7 @@ bool OpenTherm::sendResponse(unsigned long request)
 #endif
 
     interrupts();
-
-    sendBit(HIGH); // start bit
-    for (int i = 31; i >= 0; i--)
-    {
-        sendBit(bitRead(request, i));
-    }
-    sendBit(HIGH); // stop bit
-    setIdleState();
+    sendFrame(response);
     status = OpenThermStatus::READY;
 
 #ifdef INC_FREERTOS_H
@@ -280,6 +299,21 @@ void IRAM_ATTR OpenTherm::handleInterrupt()
 void IRAM_ATTR OpenTherm::handleInterruptHelper(void* ptr)
 {
     static_cast<OpenTherm*>(ptr)->handleInterrupt();
+}
+#endif
+
+#ifdef ESP32
+void IRAM_ATTR OpenTherm::handleTimerIrq() {
+    bool bit = (txbuf[txpos / 16] & (0x80 >> ((txpos / 2) % 8))) != 0;
+    if ((txpos % 2) == 0)
+        bit = !bit;
+
+    digitalWrite(outPin, bit);
+
+    txpos++;
+    if (txpos == 68) {
+        timerStop(timer);
+    }
 }
 #endif
 
