@@ -166,6 +166,7 @@ public:
     OpenTherm(int inPin = 4, int outPin = 5, bool isSlave = false);
     ~OpenTherm();
     volatile OpenThermStatus status;
+    volatile unsigned long responseTimestamp;
     void begin(void (*handleInterruptCallback)(void));
     void begin(void (*handleInterruptCallback)(void), void (*processResponseCallback)(unsigned long, OpenThermResponseStatus));
 #ifdef ESP32
@@ -239,7 +240,6 @@ private:
 
     volatile unsigned long response;
     volatile OpenThermResponseStatus responseStatus;
-    volatile unsigned long responseTimestamp;
     volatile byte responseBitIndex;
 
 #ifdef ESP32
