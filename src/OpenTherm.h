@@ -20,9 +20,9 @@ P MGS-TYPE SPARE DATA-ID  DATA-VALUE
 #include "FunctionalInterrupt.h"
 #endif
 
-#ifdef ESP32
+#if defined(SOC_GPTIMER_SUPPORTED) && SOC_GPTIMER_SUPPORTED
 #include <bitset>
-#include <driver/gptimer.h> // Используем gptimer вместо hw_timer
+#include <driver/gptimer.h>
 #endif
 
 enum class OpenThermResponseStatus : byte
@@ -246,7 +246,7 @@ protected:
     volatile unsigned long responseTimestamp;
     volatile byte responseBitIndex;
 
-#ifdef ESP32
+#if defined(SOC_GPTIMER_SUPPORTED) && SOC_GPTIMER_SUPPORTED
     gptimer_handle_t txTimer;
     std::bitset<68> txBuffer;
     volatile size_t txIndex;
@@ -258,7 +258,9 @@ protected:
     void setIdleState();
     void activateBoiler();
 
+#if !defined(SOC_GPTIMER_SUPPORTED) || !SOC_GPTIMER_SUPPORTED
     void sendBit(bool high);
+#endif
     void sendFrame(const unsigned long);
     void processResponse();
     void (*processResponseCallback)(unsigned long, OpenThermResponseStatus);

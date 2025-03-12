@@ -16,7 +16,7 @@ OpenTherm::OpenTherm(int inPin, int outPin, bool isSlave, bool alwaysReceive) :
     responseTimestamp(0),
     processResponseCallback(NULL)
 {
-#ifdef ESP32
+#if defined(SOC_GPTIMER_SUPPORTED) && SOC_GPTIMER_SUPPORTED
     txTimer = NULL;
     txIndex = 0;
 #endif
@@ -42,7 +42,7 @@ bool OpenTherm::begin(void (*handleInterruptCallback)(void))
     }
 #endif
 
-#ifdef ESP32
+#if defined(SOC_GPTIMER_SUPPORTED) && SOC_GPTIMER_SUPPORTED
     gptimer_config_t tConfig = {
         .clk_src = GPTIMER_CLK_SRC_DEFAULT,
         .direction = GPTIMER_COUNT_UP,
@@ -117,30 +117,7 @@ void OpenTherm::activateBoiler()
     delay(1000);
 }
 
-void OpenTherm::sendBit(bool high)
-{
-    if (high)
-    {
-        setActiveState();
-    }
-    else
-    {
-        setIdleState();
-    }
-    delayMicroseconds(500);
-
-    if (high)
-    {
-        setIdleState();
-    }
-    else
-    {
-        setActiveState();
-    }
-    delayMicroseconds(500);
-}
-
-#ifdef ESP32
+#if defined(SOC_GPTIMER_SUPPORTED) && SOC_GPTIMER_SUPPORTED
 bool IRAM_ATTR OpenTherm::onTxTimer(gptimer_handle_t timer, const gptimer_alarm_event_data_t *eData, void *uData)
 {
     OpenTherm *self = static_cast<OpenTherm *>(uData);
@@ -177,6 +154,10 @@ void OpenTherm::sendFrame(const unsigned long request)
     txIndex = 0;
     txBuffer.reset();
 
+    if (txTimer == NULL)
+        return;
+    }
+
     // Start bit
     txBuffer.set(pos++, true);
     txBuffer.set(pos++, false);
@@ -196,6 +177,24 @@ void OpenTherm::sendFrame(const unsigned long request)
     gptimer_start(txTimer);
 }
 #else
+void OpenTherm::sendBit(bool high)
+{
+    if (high)
+    {
+        setActiveState();
+        delayMicroseconds(500);
+        setIdleState();
+    }
+    else
+    {
+        setIdleState();
+        delayMicroseconds(500);
+        setActiveState();
+    }
+
+    delayMicroseconds(500);
+}
+
 void OpenTherm::sendFrame(const unsigned long request)
 {
     sendBit(HIGH); // start bit
@@ -228,7 +227,6 @@ bool OpenTherm::sendRequestAsync(unsigned long request)
     responseStatus = OpenThermResponseStatus::NONE;
 
     interrupts();
-
     sendFrame(request);
 
     return true;
@@ -265,7 +263,6 @@ bool OpenTherm::sendResponse(unsigned long request)
     responseStatus = OpenThermResponseStatus::NONE;
 
     interrupts();
-
     sendFrame(request);
 
     return true;
@@ -370,12 +367,17 @@ void OpenTherm::processResponse()
 
 void OpenTherm::process()
 {
+    if (status == OpenThermStatus::REQUEST_SENDING)
+    {
+        return;
+    }
+
     noInterrupts();
     OpenThermStatus st = status;
     unsigned long ts = responseTimestamp;
     interrupts();
 
-    if (st == OpenThermStatus::READY || status == OpenThermStatus::REQUEST_SENDING)
+    if (st == OpenThermStatus::READY)
     {
         return;
     }
@@ -494,7 +496,7 @@ void OpenTherm::end()
     responseStatus = OpenThermResponseStatus::NONE;
     responseTimestamp = 0;
 
-#ifdef ESP32
+#if defined(SOC_GPTIMER_SUPPORTED) && SOC_GPTIMER_SUPPORTED
     if (txTimer != NULL)
     {
         gptimer_stop(txTimer);
