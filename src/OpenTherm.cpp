@@ -4,23 +4,25 @@ Copyright 2023, Ihor Melnyk
 */
 
 #include "OpenTherm.h"
-#if !defined(__AVR__)
-#include "FunctionalInterrupt.h"
-#endif
 
-OpenTherm::OpenTherm(int inPin, int outPin, bool isSlave) :
+OpenTherm::OpenTherm(int inPin, int outPin, bool isSlave, bool alwaysReceive) :
     status(OpenThermStatus::NOT_INITIALIZED),
     inPin(inPin),
     outPin(outPin),
     isSlave(isSlave),
+    alwaysReceive(alwaysReceive),
     response(0),
     responseStatus(OpenThermResponseStatus::NONE),
     responseTimestamp(0),
     processResponseCallback(NULL)
 {
+#ifdef ESP32
+    txTimer = NULL;
+    txIndex = 0;
+#endif
 }
 
-void OpenTherm::begin(void (*handleInterruptCallback)(void))
+bool OpenTherm::begin(void (*handleInterruptCallback)(void))
 {
     pinMode(inPin, INPUT);
     pinMode(outPin, OUTPUT);
@@ -28,37 +30,64 @@ void OpenTherm::begin(void (*handleInterruptCallback)(void))
     {
         attachInterrupt(digitalPinToInterrupt(inPin), handleInterruptCallback, CHANGE);
     }
+#ifndef __AVR__
     else
     {
-#if !defined(__AVR__)
         attachInterruptArg(
             digitalPinToInterrupt(inPin),
             OpenTherm::handleInterruptHelper,
             this,
             CHANGE
         );
-#endif
     }
+#endif
+
+#ifdef ESP32
+    gptimer_config_t tConfig = {
+        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
+        .direction = GPTIMER_COUNT_UP,
+        .resolution_hz = 1000000, // 1 tick = 1 us
+    };
+    if (gptimer_new_timer(&tConfig, &txTimer) != ESP_OK)
+    {
+        return false;
+    }
+
+    gptimer_event_callbacks_t cbs = {
+        .on_alarm = OpenTherm::onTxTimer,
+    };
+    gptimer_register_event_callbacks(txTimer, &cbs, this);
+    gptimer_enable(txTimer);
+    gptimer_alarm_config_t taConfig = {
+        .alarm_count = 500, // 500 us
+        .reload_count = 0,
+        .flags = { .auto_reload_on_alarm = 1 }
+    };
+    gptimer_set_alarm_action(txTimer, &taConfig);
+#endif
+
     activateBoiler();
     status = OpenThermStatus::READY;
+
+    return true;
 }
 
-void OpenTherm::begin(void (*handleInterruptCallback)(void), void (*processResponseCallback)(unsigned long, OpenThermResponseStatus))
+bool OpenTherm::begin(void (*handleInterruptCallback)(void), void (*processResponseCallback)(unsigned long, OpenThermResponseStatus))
 {
-    begin(handleInterruptCallback);
     this->processResponseCallback = processResponseCallback;
+    return begin(handleInterruptCallback);
 }
 
-#if !defined(__AVR__)
-void OpenTherm::begin()
+#ifndef __AVR__
+bool OpenTherm::begin()
 {
-    begin(NULL);
+    return begin(NULL);
 }
 
-void OpenTherm::begin(std::function<void(unsigned long, OpenThermResponseStatus)> processResponseFunction)
+bool OpenTherm::begin(std::function<void(unsigned long, OpenThermResponseStatus)> processResponseFunction)
 {
-    begin();
     this->processResponseFunction = processResponseFunction;
+    return begin();
 }
 #endif
 
@@ -91,16 +120,97 @@ void OpenTherm::activateBoiler()
 void OpenTherm::sendBit(bool high)
 {
     if (high)
+    {
         setActiveState();
+    }
     else
+    {
         setIdleState();
+    }
     delayMicroseconds(500);
+
     if (high)
+    {
         setIdleState();
+    }
     else
+    {
         setActiveState();
+    }
     delayMicroseconds(500);
 }
+
+#ifdef ESP32
+bool IRAM_ATTR OpenTherm::onTxTimer(gptimer_handle_t timer, const gptimer_alarm_event_data_t *eData, void *uData)
+{
+    OpenTherm *self = static_cast<OpenTherm *>(uData);
+    if (self->txIndex < self->txBuffer.size())
+    {
+        if (self->txBuffer[self->txIndex])
+        {
+            self->setActiveState();
+        }
+        else
+        {
+            self->setIdleState();
+        }
+        self->txIndex++;
+    }
+    else
+    {
+        gptimer_stop(timer);
+
+        self->setIdleState();
+        self->status = (self->isSlave || self->alwaysReceive) 
+            ? OpenThermStatus::READY 
+            : OpenThermStatus::RESPONSE_WAITING;
+        self->responseTimestamp = micros();
+        self->txIndex = 0;
+    }
+
+    return true;
+}
+
+void OpenTherm::sendFrame(const unsigned long request)
+{
+    size_t pos = 0;
+    txIndex = 0;
+    txBuffer.reset();
+
+    // Start bit
+    txBuffer.set(pos++, true);
+    txBuffer.set(pos++, false);
+
+    // Frame
+    for (int i = 31; i >= 0; i--)
+    {
+        bool bit = bitRead(request, i);
+        txBuffer.set(pos++, bit);
+        txBuffer.set(pos++, !bit);
+    }
+
+    // Stop bit
+    txBuffer.set(pos++, true);
+    txBuffer.set(pos++, false);
+
+    gptimer_start(txTimer);
+}
+#else
+void OpenTherm::sendFrame(const unsigned long request)
+{
+    sendBit(HIGH); // start bit
+    for (int i = 31; i >= 0; i--)
+    {
+        sendBit(bitRead(request, i));
+    }
+    sendBit(HIGH); // stop bit
+    setIdleState();
+
+    status = (isSlave || alwaysReceive) 
+        ? OpenThermStatus::READY 
+        : OpenThermStatus::RESPONSE_WAITING;
+}
+#endif
 
 bool OpenTherm::sendRequestAsync(unsigned long request)
 {
@@ -117,32 +227,9 @@ bool OpenTherm::sendRequestAsync(unsigned long request)
     response = 0;
     responseStatus = OpenThermResponseStatus::NONE;
 
-#ifdef INC_FREERTOS_H
-    BaseType_t schedulerState = xTaskGetSchedulerState();
-    if (schedulerState == taskSCHEDULER_RUNNING)
-    {
-        vTaskSuspendAll();
-    }
-#endif
-
     interrupts();
 
-    sendBit(HIGH); // start bit
-    for (int i = 31; i >= 0; i--)
-    {
-        sendBit(bitRead(request, i));
-    }
-    sendBit(HIGH); // stop bit
-    setIdleState();
-
-    responseTimestamp = micros();
-    status = OpenThermStatus::RESPONSE_WAITING;
-
-#ifdef INC_FREERTOS_H
-    if (schedulerState == taskSCHEDULER_RUNNING) {
-        xTaskResumeAll();
-    }
-#endif
+    sendFrame(request);
 
     return true;
 }
@@ -177,30 +264,9 @@ bool OpenTherm::sendResponse(unsigned long request)
     response = 0;
     responseStatus = OpenThermResponseStatus::NONE;
 
-#ifdef INC_FREERTOS_H
-    BaseType_t schedulerState = xTaskGetSchedulerState();
-    if (schedulerState == taskSCHEDULER_RUNNING)
-    {
-        vTaskSuspendAll();
-    }
-#endif
-
     interrupts();
 
-    sendBit(HIGH); // start bit
-    for (int i = 31; i >= 0; i--)
-    {
-        sendBit(bitRead(request, i));
-    }
-    sendBit(HIGH); // stop bit
-    setIdleState();
-    status = OpenThermStatus::READY;
-
-#ifdef INC_FREERTOS_H
-    if (schedulerState == taskSCHEDULER_RUNNING) {
-        xTaskResumeAll();
-    }
-#endif
+    sendFrame(request);
 
     return true;
 }
@@ -217,9 +283,14 @@ OpenThermResponseStatus OpenTherm::getLastResponseStatus()
 
 void IRAM_ATTR OpenTherm::handleInterrupt()
 {
+    if (status == OpenThermStatus::REQUEST_SENDING)
+    {
+        return;
+    }
+
     if (isReady())
     {
-        if (isSlave && readState() == HIGH)
+        if ((isSlave || alwaysReceive) && readState() == HIGH)
         {
             status = OpenThermStatus::RESPONSE_WAITING;
         }
@@ -276,7 +347,7 @@ void IRAM_ATTR OpenTherm::handleInterrupt()
     }
 }
 
-#if !defined(__AVR__)
+#ifndef __AVR__
 void IRAM_ATTR OpenTherm::handleInterruptHelper(void* ptr)
 {
     static_cast<OpenTherm*>(ptr)->handleInterrupt();
@@ -289,7 +360,7 @@ void OpenTherm::processResponse()
     {
         processResponseCallback(response, responseStatus);
     }
-#if !defined(__AVR__)
+#ifndef __AVR__
     if (this->processResponseFunction != NULL)
     {
         processResponseFunction(response, responseStatus);
@@ -304,8 +375,11 @@ void OpenTherm::process()
     unsigned long ts = responseTimestamp;
     interrupts();
 
-    if (st == OpenThermStatus::READY)
+    if (st == OpenThermStatus::READY || status == OpenThermStatus::REQUEST_SENDING)
+    {
         return;
+    }
+
     unsigned long newTs = micros();
     if (st != OpenThermStatus::NOT_INITIALIZED && st != OpenThermStatus::DELAY && (newTs - ts) > 1000000)
     {
@@ -340,7 +414,9 @@ bool OpenTherm::parity(unsigned long frame) // odd parity
     while (frame > 0)
     {
         if (frame & 1)
+        {
             p++;
+        }
         frame = frame >> 1;
     }
     return (p & 1);
@@ -366,7 +442,10 @@ unsigned long OpenTherm::buildRequest(OpenThermMessageType type, OpenThermMessag
     }
     request |= ((unsigned long)id) << 16;
     if (parity(request))
+    {
         request |= (1ul << 31);
+    }
+
     return request;
 }
 
@@ -376,14 +455,20 @@ unsigned long OpenTherm::buildResponse(OpenThermMessageType type, OpenThermMessa
     response |= ((unsigned long)type) << 28;
     response |= ((unsigned long)id) << 16;
     if (parity(response))
+    {
         response |= (1ul << 31);
+    }
+
     return response;
 }
 
 bool OpenTherm::isValidResponse(unsigned long response)
 {
     if (parity(response))
+    {
         return false;
+    }
+
     byte msgType = (response << 1) >> 29;
     return msgType == (byte)OpenThermMessageType::READ_ACK || msgType == (byte)OpenThermMessageType::WRITE_ACK;
 }
@@ -391,7 +476,10 @@ bool OpenTherm::isValidResponse(unsigned long response)
 bool OpenTherm::isValidRequest(unsigned long request)
 {
     if (parity(request))
+    {
         return false;
+    }
+
     byte msgType = (request << 1) >> 29;
     return msgType == (byte)OpenThermMessageType::READ_DATA || msgType == (byte)OpenThermMessageType::WRITE_DATA;
 }
@@ -399,6 +487,22 @@ bool OpenTherm::isValidRequest(unsigned long request)
 void OpenTherm::end()
 {
     detachInterrupt(digitalPinToInterrupt(inPin));
+    digitalWrite(outPin, LOW);
+
+    status = OpenThermStatus::NOT_INITIALIZED;
+    response = 0;
+    responseStatus = OpenThermResponseStatus::NONE;
+    responseTimestamp = 0;
+
+#ifdef ESP32
+    if (txTimer != NULL)
+    {
+        gptimer_stop(txTimer);
+        gptimer_disable(txTimer);
+        gptimer_del_timer(txTimer);
+        txTimer = NULL;
+    }
+#endif
 }
 
 OpenTherm::~OpenTherm()
@@ -515,9 +619,14 @@ float OpenTherm::getFloat(const unsigned long response)
 unsigned int OpenTherm::temperatureToData(float temperature)
 {
     if (temperature < 0)
+    {
         temperature = 0;
-    if (temperature > 100)
+    }
+    else if (temperature > 100)
+    {
         temperature = 100;
+    }
+
     unsigned int data = (unsigned int)(temperature * 256);
     return data;
 }

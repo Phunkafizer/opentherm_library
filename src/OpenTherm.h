@@ -16,6 +16,15 @@ P MGS-TYPE SPARE DATA-ID  DATA-VALUE
 #include <stdint.h>
 #include <Arduino.h>
 
+#ifndef __AVR__
+#include "FunctionalInterrupt.h"
+#endif
+
+#ifdef ESP32
+#include <bitset>
+#include <driver/gptimer.h> // Используем gptimer вместо hw_timer
+#endif
+
 enum class OpenThermResponseStatus : byte
 {
     NONE,
@@ -163,19 +172,19 @@ enum class OpenThermStatus : byte
 class OpenTherm
 {
 public:
-    OpenTherm(int inPin = 4, int outPin = 5, bool isSlave = false);
+    OpenTherm(int inPin = 4, int outPin = 5, bool isSlave = false, bool alwaysReceive = false);
     ~OpenTherm();
     volatile OpenThermStatus status;
-    void begin(void (*handleInterruptCallback)(void));
-    void begin(void (*handleInterruptCallback)(void), void (*processResponseCallback)(unsigned long, OpenThermResponseStatus));
-#if !defined(__AVR__)
-    void begin();
-    void begin(std::function<void(unsigned long, OpenThermResponseStatus)> processResponseFunction);
+    bool begin(void (*handleInterruptCallback)(void));
+    bool begin(void (*handleInterruptCallback)(void), void (*processResponseCallback)(unsigned long, OpenThermResponseStatus));
+#ifndef __AVR__
+    bool begin();
+    bool begin(std::function<void(unsigned long, OpenThermResponseStatus)> processResponseFunction);
 #endif
     bool isReady();
-    unsigned long sendRequest(unsigned long request);
-    bool sendResponse(unsigned long request);
-    bool sendRequestAsync(unsigned long request);
+    virtual unsigned long sendRequest(unsigned long request);
+    virtual bool sendResponse(unsigned long request);
+    virtual bool sendRequestAsync(unsigned long request);
     [[deprecated("Use OpenTherm::sendRequestAsync(unsigned long) instead")]]
     bool sendRequestAync(unsigned long request) {
         return sendRequestAsync(request);
@@ -186,7 +195,7 @@ public:
     OpenThermResponseStatus getLastResponseStatus();
     static const char *statusToString(OpenThermResponseStatus status);
     void handleInterrupt();
-#if !defined(__AVR__)
+#ifndef __AVR__
     static void handleInterruptHelper(void* ptr);
 #endif
     void process();
@@ -226,15 +235,23 @@ public:
     float getPressure();
     unsigned char getFault();
 
-private:
+protected:
     const int inPin;
     const int outPin;
     const bool isSlave;
+    const bool alwaysReceive;
 
     volatile unsigned long response;
     volatile OpenThermResponseStatus responseStatus;
     volatile unsigned long responseTimestamp;
     volatile byte responseBitIndex;
+
+#ifdef ESP32
+    gptimer_handle_t txTimer;
+    std::bitset<68> txBuffer;
+    volatile size_t txIndex;
+    static bool IRAM_ATTR onTxTimer(gptimer_handle_t, const gptimer_alarm_event_data_t *, void *);
+#endif
 
     int readState();
     void setActiveState();
@@ -242,9 +259,10 @@ private:
     void activateBoiler();
 
     void sendBit(bool high);
+    void sendFrame(const unsigned long);
     void processResponse();
     void (*processResponseCallback)(unsigned long, OpenThermResponseStatus);
-#if !defined(__AVR__)
+#ifndef __AVR__
     std::function<void(unsigned long, OpenThermResponseStatus)> processResponseFunction;
 #endif
 };
