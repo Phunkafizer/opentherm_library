@@ -155,6 +155,7 @@ void OpenTherm::sendFrame(const unsigned long request)
     txBuffer.reset();
 
     if (txTimer == NULL)
+    {
         return;
     }
 
