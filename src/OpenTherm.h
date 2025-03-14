@@ -173,7 +173,7 @@ class OpenTherm
 {
 public:
     OpenTherm(int inPin = 4, int outPin = 5, bool isSlave = false, bool alwaysReceive = false);
-    ~OpenTherm();
+    virtual ~OpenTherm();
     volatile OpenThermStatus status;
     bool begin(void (*handleInterruptCallback)(void));
     bool begin(void (*handleInterruptCallback)(void), void (*processResponseCallback)(unsigned long, OpenThermResponseStatus));
