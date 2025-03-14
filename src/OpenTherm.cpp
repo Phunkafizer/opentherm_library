@@ -570,7 +570,7 @@ unsigned long OpenTherm::buildSetBoilerStatusRequest(bool enableCentralHeating, 
     data <<= 8;
     data |= lb;
 
-    return this->sendRequest(buildRequest(
+    return sendRequest(buildRequest(
         OpenThermMessageType::READ_DATA,
         OpenThermMessageID::Status,
         data
