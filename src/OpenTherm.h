@@ -209,7 +209,7 @@ public:
     static bool isValidResponse(unsigned long response);
 
     // requests
-    static unsigned long buildSetBoilerStatusRequest(bool enableCentralHeating, bool enableHotWater = false, bool enableCooling = false, bool enableOutsideTemperatureCompensation = false, bool enableCentralHeating2 = false);
+    static unsigned long buildSetBoilerStatusRequest(bool enableCentralHeating, bool enableHotWater = false, bool enableCooling = false, bool enableOutsideTemperatureCompensation = false, bool enableCentralHeating2 = false, bool summerWinterMode = false, bool dhwBlocking = false, uint8_t lb = 0);
     static unsigned long buildSetBoilerTemperatureRequest(float temperature);
     static unsigned long buildGetBoilerTemperatureRequest();
 
@@ -225,7 +225,7 @@ public:
     static unsigned int temperatureToData(float temperature);
 
     // basic requests
-    unsigned long setBoilerStatus(bool enableCentralHeating, bool enableHotWater = false, bool enableCooling = false, bool enableOutsideTemperatureCompensation = false, bool enableCentralHeating2 = false);
+    unsigned long setBoilerStatus(bool enableCentralHeating, bool enableHotWater = false, bool enableCooling = false, bool enableOutsideTemperatureCompensation = false, bool enableCentralHeating2 = false, bool summerWinterMode = false, bool dhwBlocking = false, uint8_t lb = 0);
     bool setBoilerTemperature(float temperature);
     float getBoilerTemperature();
     float getReturnTemperature();

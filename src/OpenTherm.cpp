@@ -557,11 +557,24 @@ const char *OpenTherm::messageTypeToString(OpenThermMessageType message_type)
 
 // building requests
 
-unsigned long OpenTherm::buildSetBoilerStatusRequest(bool enableCentralHeating, bool enableHotWater, bool enableCooling, bool enableOutsideTemperatureCompensation, bool enableCentralHeating2)
+unsigned long OpenTherm::buildSetBoilerStatusRequest(bool enableCentralHeating, bool enableHotWater, bool enableCooling, bool enableOutsideTemperatureCompensation, bool enableCentralHeating2, bool summerWinterMode, bool dhwBlocking, uint8_t lb)
 {
-    unsigned int data = enableCentralHeating | (enableHotWater << 1) | (enableCooling << 2) | (enableOutsideTemperatureCompensation << 3) | (enableCentralHeating2 << 4);
+    unsigned int data = enableCentralHeating
+        | (enableHotWater << 1)
+        | (enableCooling << 2)
+        | (enableOutsideTemperatureCompensation << 3)
+        | (enableCentralHeating2 << 4)
+        | (summerWinterMode << 5)
+        | (dhwBlocking << 6);
+
     data <<= 8;
-    return buildRequest(OpenThermMessageType::READ_DATA, OpenThermMessageID::Status, data);
+    data |= lb;
+
+    return this->sendRequest(buildRequest(
+        OpenThermMessageType::READ_DATA,
+        OpenThermMessageID::Status,
+        data
+    ));
 }
 
 unsigned long OpenTherm::buildSetBoilerTemperatureRequest(float temperature)
@@ -636,9 +649,18 @@ unsigned int OpenTherm::temperatureToData(float temperature)
 
 // basic requests
 
-unsigned long OpenTherm::setBoilerStatus(bool enableCentralHeating, bool enableHotWater, bool enableCooling, bool enableOutsideTemperatureCompensation, bool enableCentralHeating2)
+unsigned long OpenTherm::setBoilerStatus(bool enableCentralHeating, bool enableHotWater, bool enableCooling, bool enableOutsideTemperatureCompensation, bool enableCentralHeating2, bool summerWinterMode, bool dhwBlocking, uint8_t lb)
 {
-    return sendRequest(buildSetBoilerStatusRequest(enableCentralHeating, enableHotWater, enableCooling, enableOutsideTemperatureCompensation, enableCentralHeating2));
+    return sendRequest(buildSetBoilerStatusRequest(
+        enableCentralHeating,
+        enableHotWater,
+        enableCooling,
+        enableOutsideTemperatureCompensation,
+        enableCentralHeating2,
+        summerWinterMode,
+        dhwBlocking,
+        lb
+    ));
 }
 
 bool OpenTherm::setBoilerTemperature(float temperature)
