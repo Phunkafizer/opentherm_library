@@ -169,6 +169,13 @@ enum class OpenThermStatus : byte
     RESPONSE_INVALID
 };
 
+enum class OpenThermSmartPower : byte
+{
+    SMART_POWER_LOW = 0,
+    SMART_POWER_MEDIUM = 1,
+    SMART_POWER_HIGH = 2
+};
+
 class OpenTherm
 {
 public:
@@ -210,6 +217,8 @@ public:
     static bool isValidRequest(unsigned long request);
     static bool isValidResponse(unsigned long response);
 
+    OpenThermSmartPower getSmartPowerState();
+
     // requests
     static unsigned long buildSetBoilerStatusRequest(bool enableCentralHeating, bool enableHotWater = false, bool enableCooling = false, bool enableOutsideTemperatureCompensation = false, bool enableCentralHeating2 = false, bool summerWinterMode = false, bool dhwBlocking = false, uint8_t lb = 0);
     static unsigned long buildSetBoilerTemperatureRequest(float temperature);
@@ -247,6 +256,10 @@ protected:
     volatile OpenThermResponseStatus responseStatus;
     volatile unsigned long responseTimestamp;
     volatile byte responseBitIndex;
+
+    volatile bool smartPowerEnabled {false};
+    volatile bool rxIdleLevel {false};
+    volatile bool txIdleLevel {false};
 
 #if defined(SOC_GPTIMER_SUPPORTED) && SOC_GPTIMER_SUPPORTED
     gptimer_handle_t txTimer;
