@@ -175,6 +175,8 @@ public:
     OpenTherm(int inPin = 4, int outPin = 5, bool isSlave = false, bool alwaysReceive = false);
     virtual ~OpenTherm();
     volatile OpenThermStatus status;
+    bool getAlwaysReceive();
+    void setAlwaysReceive(bool value);
     bool begin(void (*handleInterruptCallback)(void));
     bool begin(void (*handleInterruptCallback)(void), void (*processResponseCallback)(unsigned long, OpenThermResponseStatus));
 #ifndef __AVR__
@@ -239,7 +241,7 @@ protected:
     const int inPin;
     const int outPin;
     const bool isSlave;
-    const bool alwaysReceive;
+    bool alwaysReceive;
 
     volatile unsigned long response;
     volatile OpenThermResponseStatus responseStatus;

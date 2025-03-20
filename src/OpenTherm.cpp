@@ -22,6 +22,16 @@ OpenTherm::OpenTherm(int inPin, int outPin, bool isSlave, bool alwaysReceive) :
 #endif
 }
 
+bool OpenTherm::getAlwaysReceive()
+{
+    return alwaysReceive;
+}
+
+void OpenTherm::setAlwaysReceive(bool value)
+{
+    alwaysReceive = value;
+}
+
 bool OpenTherm::begin(void (*handleInterruptCallback)(void))
 {
     pinMode(inPin, INPUT);
