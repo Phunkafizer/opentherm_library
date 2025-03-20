@@ -108,7 +108,7 @@ bool IRAM_ATTR OpenTherm::isReady()
 
 int IRAM_ATTR OpenTherm::readState()
 {
-    return digitalRead(inPin);
+    return digitalRead(inPin) ^ rxIdleLevel;
 }
 
 void OpenTherm::setActiveState()
@@ -495,6 +495,10 @@ bool OpenTherm::isValidRequest(unsigned long request)
 
     byte msgType = (request << 1) >> 29;
     return msgType == (byte)OpenThermMessageType::READ_DATA || msgType == (byte)OpenThermMessageType::WRITE_DATA;
+}
+
+OpenThermSmartPower OpenTherm::getSmartPowerState() {
+    return OpenThermSmartPower::SMART_POWER_HIGH;
 }
 
 void OpenTherm::end()
