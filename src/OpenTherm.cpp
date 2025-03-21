@@ -34,6 +34,57 @@ void OpenTherm::setAlwaysReceive(bool value)
 
 bool OpenTherm::begin(void (*handleInterruptCallback)(void))
 {
+#if defined(SOC_GPTIMER_SUPPORTED) && SOC_GPTIMER_SUPPORTED
+    if (txTimer != NULL) {
+        return false;
+    }
+
+    gptimer_config_t tConfig = {
+        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
+        .direction = GPTIMER_COUNT_UP,
+        .resolution_hz = 1000000, // 1 tick = 1 us
+    };
+    if (gptimer_new_timer(&tConfig, &txTimer) != ESP_OK)
+    {
+        txTimer = NULL;
+
+        return false;
+    }
+
+    gptimer_event_callbacks_t cbs = {
+        .on_alarm = OpenTherm::onTxTimer,
+    };
+    if (gptimer_register_event_callbacks(txTimer, &cbs, this) != ESP_OK)
+    {
+        gptimer_del_timer(txTimer);
+        txTimer = NULL;
+
+        return false;
+    }
+
+    if (gptimer_enable(txTimer) != ESP_OK)
+    {
+        gptimer_del_timer(txTimer);
+        txTimer = NULL;
+
+        return false;
+    }
+    
+    gptimer_alarm_config_t taConfig = {
+        .alarm_count = 500, // 500 us
+        .reload_count = 0,
+        .flags = { .auto_reload_on_alarm = 1 }
+    };
+    if (gptimer_set_alarm_action(txTimer, &taConfig) != ESP_OK)
+    {
+        gptimer_disable(txTimer);
+        gptimer_del_timer(txTimer);
+        txTimer = NULL;
+
+        return false;
+    }
+#endif
+
     pinMode(inPin, INPUT);
     pinMode(outPin, OUTPUT);
     if (handleInterruptCallback != NULL)
@@ -50,30 +101,6 @@ bool OpenTherm::begin(void (*handleInterruptCallback)(void))
             CHANGE
         );
     }
-#endif
-
-#if defined(SOC_GPTIMER_SUPPORTED) && SOC_GPTIMER_SUPPORTED
-    gptimer_config_t tConfig = {
-        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
-        .direction = GPTIMER_COUNT_UP,
-        .resolution_hz = 1000000, // 1 tick = 1 us
-    };
-    if (gptimer_new_timer(&tConfig, &txTimer) != ESP_OK)
-    {
-        return false;
-    }
-
-    gptimer_event_callbacks_t cbs = {
-        .on_alarm = OpenTherm::onTxTimer,
-    };
-    gptimer_register_event_callbacks(txTimer, &cbs, this);
-    gptimer_enable(txTimer);
-    gptimer_alarm_config_t taConfig = {
-        .alarm_count = 500, // 500 us
-        .reload_count = 0,
-        .flags = { .auto_reload_on_alarm = 1 }
-    };
-    gptimer_set_alarm_action(txTimer, &taConfig);
 #endif
 
     activateBoiler();
