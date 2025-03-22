@@ -156,17 +156,21 @@ enum class OpenThermMessageID : byte
     SlaveVersion                               = 127, // u8/u8     Slave product version number and type
 };
 
-enum class OpenThermStatus : byte
+enum class OpenThermRxStatus : byte
 {
     NOT_INITIALIZED,
-    READY,
-    DELAY,
-    REQUEST_SENDING,
-    RESPONSE_WAITING,
-    RESPONSE_START_BIT,
-    RESPONSE_RECEIVING,
-    RESPONSE_READY,
-    RESPONSE_INVALID
+    IDLE,
+    RX_START_BIT,
+    RX_DATA,
+    DATA_READY,
+    DATA_INVALID
+};
+
+enum class OpenThermTxStatus : byte
+{
+    IDLE,
+    TX_DATA,
+    WAIT_RESPONSE
 };
 
 enum class OpenThermSmartPower : byte
@@ -179,9 +183,9 @@ enum class OpenThermSmartPower : byte
 class OpenTherm
 {
 public:
-    OpenTherm(int inPin = 4, int outPin = 5, bool isSlave = false, bool alwaysReceive = false);
+    OpenTherm(int inPin = 4, int outPin = 5, bool isSlave = false);
     virtual ~OpenTherm();
-    volatile OpenThermStatus status;
+    volatile OpenThermRxStatus rxStatus;
     bool getAlwaysReceive();
     void setAlwaysReceive(bool value);
     bool begin(void (*handleInterruptCallback)(void));
@@ -256,10 +260,16 @@ protected:
     volatile OpenThermResponseStatus responseStatus;
     volatile unsigned long responseTimestamp;
     volatile byte responseBitIndex;
+    volatile OpenThermTxStatus txStatus;
+    volatile unsigned long requestTimestamp;
+    volatile unsigned long delayTimestamp;
 
     volatile bool smartPowerEnabled {false};
     volatile bool rxIdleLevel {false};
     volatile bool txIdleLevel {false};
+    volatile bool rxPinState;
+    volatile bool txIdleChangeRequest {false};
+    void setDelay(uint16_t ms);
 
 #if defined(SOC_GPTIMER_SUPPORTED) && SOC_GPTIMER_SUPPORTED
     gptimer_handle_t txTimer;
