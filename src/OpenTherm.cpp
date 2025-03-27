@@ -5,7 +5,7 @@ Copyright 2023, Ihor Melnyk
 
 #include "OpenTherm.h"
 
-const uint16_t RESPONSE_TIME = 20; // OpenTherm specification allows 20 .. 800 ms
+const uint16_t RESPONSE_TIME = 50; // OpenTherm specification allows 20 .. 800 ms
 const uint16_t IDLE_TIME_AFTER_SWITCH = 20; // time after idle level switch of master before slave may reply
 
 OpenTherm::OpenTherm(int inPin, int outPin, bool isSlave) :
@@ -328,16 +328,15 @@ void IRAM_ATTR OpenTherm::handleInterrupt()
 
     switch (rxStatus) {
     case OpenThermRxStatus::IDLE:
-        Serial0.write('S');
-        Serial0.write((int) rxIdleLevel + '0');
         if (rxPinState == true) { // rx pin active?
-            Serial0.write('A');
             rxStatus = OpenThermRxStatus::RX_START_BIT;
+            if (rxPinState && rxIdleLevel && txIdleLevel && (newTs - responseTimestamp > 15000) && (newTs - responseTimestamp < 25000)) {
+                txIdleChangeRequest = true;
+            }
         }
         break;
 
     case OpenThermRxStatus::RX_START_BIT:
-        Serial0.write('T');
         rxStatus = OpenThermRxStatus::RX_DATA;
         responseBitIndex = 0;
         break;
@@ -352,7 +351,6 @@ void IRAM_ATTR OpenTherm::handleInterrupt()
             }
             else
             { // stop bit
-                Serial0.write('O');
                 rxStatus = OpenThermRxStatus::DATA_READY;
                 responseTimestamp = newTs;
             }
@@ -404,16 +402,29 @@ void OpenTherm::process()
     interrupts();
     unsigned long newTs = micros();
 
-    if ( (st != OpenThermRxStatus::IDLE) && ((newTs - ts) > 5000)) {
-        if (smartPowerEnabled && (rxStatus == OpenThermRxStatus::RX_START_BIT)) {
-            rxIdleLevel = rxPinState;;
-            rxStatus = OpenThermRxStatus::IDLE;
-            setDelay(IDLE_TIME_AFTER_SWITCH); // idle time after switch; wait for reply after idle level switch of master
-            if (rxIdleLevel)
-                txIdleChangeRequest = true;
+    if (isSlave && ((newTs - ts) > 1250000)) {
+        rxIdleLevel = false;
+        smartPowerEnabled = false;
+        txIdleChangeRequest = false;
+        if (txIdleLevel) {
+            txIdleLevel = false;
+            setIdleState();
         }
-        else
-            rxStatus = OpenThermRxStatus::DATA_INVALID;
+    }
+
+    if ( (st != OpenThermRxStatus::IDLE) && ((newTs - ts) > 5000)) {
+        if (smartPowerEnabled) {
+            rxIdleLevel = rxPinState ^ rxIdleLevel;
+            setDelay(IDLE_TIME_AFTER_SWITCH); // idle time after switch; wait for reply after idle level switch of master
+            if (st == OpenThermRxStatus::RX_START_BIT) {
+                st = OpenThermRxStatus::IDLE;
+                if (rxIdleLevel && !txIdleLevel)
+                    txIdleChangeRequest = true;
+            }   
+        }
+        if ( (st != OpenThermRxStatus::IDLE) && (st != OpenThermRxStatus::DATA_READY) )
+            st = OpenThermRxStatus::DATA_INVALID;
+        rxStatus = st;
     }
 
     if (txIdleChangeRequest && ((newTs - requestTimestamp) > 2000)) {
@@ -425,61 +436,28 @@ void OpenTherm::process()
 
     switch (st) {
     case OpenThermRxStatus::DATA_READY:
-        Serial0.write('D');
         rxStatus = OpenThermRxStatus::IDLE;
+        if (!isSlave)
+            txStatus = OpenThermTxStatus::IDLE;
         delayTimestamp = ts + RESPONSE_TIME * 1000UL;
         responseStatus = (isSlave ? isValidRequest(response) : isValidResponse(response)) ? OpenThermResponseStatus::SUCCESS : OpenThermResponseStatus::INVALID;
-        if (isSlave && (getDataID(response) == OpenThermMessageID::MConfigMMemberIDcode))
+        if (isSlave && (responseStatus == OpenThermResponseStatus::SUCCESS) && (getDataID(response) == OpenThermMessageID::MConfigMMemberIDcode))
             smartPowerEnabled = (response & 0x0100) != 0;
         processResponse();
         break;
 
     case OpenThermRxStatus::DATA_INVALID:
-        Serial0.write('I');
         rxStatus = OpenThermRxStatus::IDLE; // temp, for testing
         responseStatus = OpenThermResponseStatus::INVALID;
         processResponse();
         break;
     }
-    /*
-    if (status == OpenThermStatus::REQUEST_SENDING)
-    {
-        return;
-    }
 
-    
-
-    if (st == OpenThermStatus::READY)
-    {
-        return;
-    }
-
-    unsigned long newTs = micros();
-    if (st != OpenThermStatus::NOT_INITIALIZED && st != OpenThermStatus::DELAY && (newTs - ts) > 1000000)
-    {
-        status = OpenThermStatus::READY;
+    if ( (txStatus == OpenThermTxStatus::WAIT_RESPONSE) && (newTs - requestTimestamp) > 1000000) {
+        txStatus = OpenThermTxStatus::IDLE;
         responseStatus = OpenThermResponseStatus::TIMEOUT;
         processResponse();
     }
-    else if (st == OpenThermStatus::RESPONSE_INVALID)
-    {
-        status = OpenThermStatus::DELAY;
-        responseStatus = OpenThermResponseStatus::INVALID;
-        processResponse();
-    }
-    else if (st == OpenThermStatus::RESPONSE_READY)
-    {
-        status = OpenThermStatus::DELAY;
-        responseStatus = (isSlave ? isValidRequest(response) : isValidResponse(response)) ? OpenThermResponseStatus::SUCCESS : OpenThermResponseStatus::INVALID;
-        processResponse();
-    }
-    else if (st == OpenThermStatus::DELAY)
-    {
-        if ((newTs - ts) > (isSlave ? 20000 : 100000))
-        {
-            status = OpenThermStatus::READY;
-        }
-    }*/
 }
 
 bool OpenTherm::parity(unsigned long frame) // odd parity
@@ -544,7 +522,7 @@ bool OpenTherm::isValidResponse(unsigned long response)
     }
 
     byte msgType = (response << 1) >> 29;
-    return msgType == (byte)OpenThermMessageType::READ_ACK || msgType == (byte)OpenThermMessageType::WRITE_ACK;
+    return msgType == (byte)OpenThermMessageType::READ_ACK || msgType == (byte)OpenThermMessageType::WRITE_ACK || msgType == (byte)OpenThermMessageType::UNKNOWN_DATA_ID;
 }
 
 bool OpenTherm::isValidRequest(unsigned long request)
