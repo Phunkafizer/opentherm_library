@@ -399,6 +399,7 @@ void OpenTherm::process()
     noInterrupts();
     OpenThermRxStatus st = rxStatus;
     unsigned long ts = responseTimestamp;
+    unsigned long reqts = requestTimestamp;
     interrupts();
     unsigned long newTs = micros();
 
@@ -453,7 +454,7 @@ void OpenTherm::process()
         break;
     }
 
-    if ( (txStatus == OpenThermTxStatus::WAIT_RESPONSE) && (newTs - requestTimestamp) > 1000000) {
+    if ( (txStatus == OpenThermTxStatus::WAIT_RESPONSE) && (newTs - reqts) > 1000000) {
         txStatus = OpenThermTxStatus::IDLE;
         responseStatus = OpenThermResponseStatus::TIMEOUT;
         processResponse();
