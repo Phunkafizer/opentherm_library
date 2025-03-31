@@ -133,7 +133,7 @@ bool OpenTherm::begin(std::function<void(unsigned long, OpenThermResponseStatus)
 
 bool IRAM_ATTR OpenTherm::isReady()
 {
-    return (rxStatus == OpenThermRxStatus::IDLE) && (txStatus == OpenThermTxStatus::IDLE) && (delayTimestamp < micros());
+    return (rxStatus == OpenThermRxStatus::IDLE) && (txStatus == OpenThermTxStatus::IDLE) && (micros() - delayTimestamp < 0x80000000);
 }
 
 int IRAM_ATTR OpenTherm::readState()
