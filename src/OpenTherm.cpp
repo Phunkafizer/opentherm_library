@@ -7,6 +7,8 @@ Copyright 2023, Ihor Melnyk
 
 const uint16_t RESPONSE_TIME = 50; // OpenTherm specification allows 20 .. 800 ms
 const uint16_t IDLE_TIME_AFTER_SWITCH = 20; // time after idle level switch of master before slave may reply
+const uint32_t LOW_POWER_SIGNAL_LOW_US = 30000;
+const uint32_t LOW_POWER_SIGNAL_HIGH_US = 20000;
 
 OpenTherm::OpenTherm(int inPin, int outPin, bool isSlave) :
     rxStatus(OpenThermRxStatus::NOT_INITIALIZED),
@@ -133,7 +135,28 @@ bool OpenTherm::begin(std::function<void(unsigned long, OpenThermResponseStatus)
 
 bool IRAM_ATTR OpenTherm::isReady()
 {
-    return (rxStatus == OpenThermRxStatus::IDLE) && (txStatus == OpenThermTxStatus::IDLE) && (micros() - delayTimestamp < 0x80000000);
+    return (rxStatus == OpenThermRxStatus::IDLE)
+        && (txStatus == OpenThermTxStatus::IDLE)
+        && (micros() - delayTimestamp < 0x80000000);
+}
+
+bool OpenTherm::requestLowPower()
+{
+    noInterrupts();
+    const bool ready = isReady();
+
+    if (!ready)
+    {
+        interrupts();
+        return false;
+    }
+
+    txStatus = OpenThermTxStatus::LOW_POWER_LOW_1;
+    lowPowerSignalTimestamp = micros();
+    setIdleState();
+    interrupts();
+
+    return true;
 }
 
 int IRAM_ATTR OpenTherm::readState()
@@ -402,6 +425,36 @@ void OpenTherm::process()
     unsigned long reqts = requestTimestamp;
     interrupts();
     unsigned long newTs = micros();
+
+    switch (txStatus) {
+    case OpenThermTxStatus::LOW_POWER_LOW_1:
+        if ((newTs - lowPowerSignalTimestamp) >= LOW_POWER_SIGNAL_LOW_US) {
+            setActiveState();
+            lowPowerSignalTimestamp = newTs;
+            txStatus = OpenThermTxStatus::LOW_POWER_HIGH_1;
+        }
+        break;
+
+    case OpenThermTxStatus::LOW_POWER_HIGH_1:
+        if ((newTs - lowPowerSignalTimestamp) >= LOW_POWER_SIGNAL_HIGH_US) {
+            setIdleState();
+            lowPowerSignalTimestamp = newTs;
+            txStatus = OpenThermTxStatus::LOW_POWER_LOW_2;
+        }
+        break;
+
+    case OpenThermTxStatus::LOW_POWER_LOW_2:
+        if ((newTs - lowPowerSignalTimestamp) >= LOW_POWER_SIGNAL_LOW_US) {
+            txStatus = OpenThermTxStatus::IDLE;
+            lowPowerSignalTimestamp = 0;
+        }
+        break;
+
+    case OpenThermTxStatus::IDLE:
+    case OpenThermTxStatus::TX_DATA:
+    case OpenThermTxStatus::WAIT_RESPONSE:
+        break;
+    }
 
     if (isSlave && ((newTs - ts) > 1250000)) {
         rxIdleLevel = false;

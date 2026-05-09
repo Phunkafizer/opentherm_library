@@ -170,7 +170,10 @@ enum class OpenThermTxStatus : byte
 {
     IDLE,
     TX_DATA,
-    WAIT_RESPONSE
+    WAIT_RESPONSE,
+    LOW_POWER_LOW_1,
+    LOW_POWER_HIGH_1,
+    LOW_POWER_LOW_2
 };
 
 enum class OpenThermSmartPower : byte
@@ -195,6 +198,7 @@ public:
     bool begin(std::function<void(unsigned long, OpenThermResponseStatus)> processResponseFunction);
 #endif
     bool isReady();
+    bool requestLowPower();
     virtual unsigned long sendRequest(unsigned long request);
     virtual bool sendResponse(unsigned long request);
     virtual bool sendRequestAsync(unsigned long request);
@@ -269,6 +273,7 @@ protected:
     volatile bool txIdleLevel {false};
     volatile bool rxPinState;
     volatile bool txIdleChangeRequest {false};
+    volatile unsigned long lowPowerSignalTimestamp {0};
     void setDelay(uint16_t ms);
 
 #if defined(SOC_GPTIMER_SUPPORTED) && SOC_GPTIMER_SUPPORTED
