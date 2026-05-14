@@ -191,6 +191,7 @@ public:
     volatile OpenThermRxStatus rxStatus;
     bool getAlwaysReceive();
     void setAlwaysReceive(bool value);
+    void setRequestDelay(const uint16_t ms);
     bool begin(void (*handleInterruptCallback)(void));
     bool begin(void (*handleInterruptCallback)(void), void (*processResponseCallback)(unsigned long, OpenThermResponseStatus));
 #ifndef __AVR__
@@ -259,6 +260,7 @@ protected:
     const int outPin;
     const bool isSlave;
     bool alwaysReceive;
+    uint16_t requestDelay;
 
     volatile unsigned long response;
     volatile OpenThermResponseStatus responseStatus;

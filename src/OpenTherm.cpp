@@ -16,6 +16,7 @@ OpenTherm::OpenTherm(int inPin, int outPin, bool isSlave) :
     inPin(inPin),
     outPin(outPin),
     isSlave(isSlave),
+    requestDelay(RESPONSE_TIME),
     response(0),
     responseStatus(OpenThermResponseStatus::NONE),
     responseTimestamp(0),
@@ -35,6 +36,11 @@ bool OpenTherm::getAlwaysReceive()
 void OpenTherm::setAlwaysReceive(bool value)
 {
     alwaysReceive = value;
+}
+
+void OpenTherm::setRequestDelay(const uint16_t ms)
+{
+    requestDelay = ms;
 }
 
 bool OpenTherm::begin(void (*handleInterruptCallback)(void))
@@ -493,7 +499,7 @@ void OpenTherm::process()
         rxStatus = OpenThermRxStatus::IDLE;
         if (!isSlave)
             txStatus = OpenThermTxStatus::IDLE;
-        delayTimestamp = ts + RESPONSE_TIME * 1000UL;
+        delayTimestamp = newTs + (isSlave ? RESPONSE_TIME : requestDelay) * 1000UL;
         responseStatus = (isSlave ? isValidRequest(response) : isValidResponse(response)) ? OpenThermResponseStatus::SUCCESS : OpenThermResponseStatus::INVALID;
         if (isSlave && (responseStatus == OpenThermResponseStatus::SUCCESS) && (getDataID(response) == OpenThermMessageID::MConfigMMemberIDcode))
             smartPowerEnabled = (response & 0x0100) != 0;
