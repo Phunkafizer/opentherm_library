@@ -17,6 +17,7 @@ OpenTherm::OpenTherm(int inPin, int outPin, bool isSlave) :
     outPin(outPin),
     isSlave(isSlave),
     requestDelay(RESPONSE_TIME),
+    responseTimeoutUs(1000000UL),
     response(0),
     responseStatus(OpenThermResponseStatus::NONE),
     responseTimestamp(0),
@@ -41,6 +42,11 @@ void OpenTherm::setAlwaysReceive(bool value)
 void OpenTherm::setRequestDelay(const uint16_t ms)
 {
     requestDelay = ms;
+}
+
+void OpenTherm::setResponseTimeout(const uint16_t ms)
+{
+    responseTimeoutUs = (uint32_t) ms * 1000UL;
 }
 
 bool OpenTherm::begin(void (*handleInterruptCallback)(void))
@@ -513,7 +519,7 @@ void OpenTherm::process()
         break;
     }
 
-    if ( (txStatus == OpenThermTxStatus::WAIT_RESPONSE) && (newTs - reqts) > 1000000) {
+    if ( (txStatus == OpenThermTxStatus::WAIT_RESPONSE) && (newTs - reqts) > responseTimeoutUs) {
         txStatus = OpenThermTxStatus::IDLE;
         responseStatus = OpenThermResponseStatus::TIMEOUT;
         processResponse();
