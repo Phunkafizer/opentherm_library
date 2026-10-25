@@ -12,15 +12,16 @@ const uint32_t LOW_POWER_SIGNAL_HIGH_US = 20000;
 
 OpenTherm::OpenTherm(int inPin, int outPin, bool isSlave) :
     rxStatus(OpenThermRxStatus::NOT_INITIALIZED),
-    txStatus(OpenThermTxStatus::IDLE),
     inPin(inPin),
     outPin(outPin),
     isSlave(isSlave),
+    alwaysReceive(false),
     requestDelay(RESPONSE_TIME),
     responseTimeoutUs(1000000UL),
     response(0),
     responseStatus(OpenThermResponseStatus::NONE),
     responseTimestamp(0),
+    txStatus(OpenThermTxStatus::IDLE),
     processResponseCallback(NULL)
 {
 #if defined(SOC_GPTIMER_SUPPORTED) && SOC_GPTIMER_SUPPORTED
@@ -479,8 +480,8 @@ void OpenTherm::process()
     }
 
     if ( (st != OpenThermRxStatus::IDLE) && ((newTs - ts) > 5000)) {
+        rxIdleLevel = rxPinState ^ rxIdleLevel;
         if (smartPowerEnabled) {
-            rxIdleLevel = rxPinState ^ rxIdleLevel;
             setDelay(IDLE_TIME_AFTER_SWITCH); // idle time after switch; wait for reply after idle level switch of master
             if (st == OpenThermRxStatus::RX_START_BIT) {
                 st = OpenThermRxStatus::IDLE;
@@ -516,6 +517,9 @@ void OpenTherm::process()
         rxStatus = OpenThermRxStatus::IDLE; // temp, for testing
         responseStatus = OpenThermResponseStatus::INVALID;
         processResponse();
+        break;
+
+    default:
         break;
     }
 
