@@ -9,6 +9,7 @@ const uint16_t RESPONSE_TIME = 50; // OpenTherm specification allows 20 .. 800 m
 const uint16_t IDLE_TIME_AFTER_SWITCH = 20; // time after idle level switch of master before slave may reply
 const uint32_t LOW_POWER_SIGNAL_LOW_US = 30000;
 const uint32_t LOW_POWER_SIGNAL_HIGH_US = 20000;
+const uint32_t TX_STALL_TIMEOUT_US = 10000; // a half bit is 500 us; no tx timer tick for this long means it stopped
 
 OpenTherm::OpenTherm(int inPin, int outPin, bool isSlave) :
     rxStatus(OpenThermRxStatus::NOT_INITIALIZED),
@@ -426,7 +427,8 @@ void OpenTherm::processResponse()
 void OpenTherm::setDelay(uint16_t ms) {
     unsigned long newDelay;
     newDelay = micros() + ms * 1000UL;
-    if (newDelay > delayTimestamp)
+    // signed difference: stays correct when micros() wraps (needs a fresh delayTimestamp, see process())
+    if ((long)(newDelay - delayTimestamp) > 0)
         delayTimestamp = newDelay;
 }
 
@@ -463,11 +465,31 @@ void OpenTherm::process()
         }
         break;
 
-    case OpenThermTxStatus::IDLE:
     case OpenThermTxStatus::TX_DATA:
+#if defined(SOC_GPTIMER_SUPPORTED) && SOC_GPTIMER_SUPPORTED
+        // the tx timer refreshes requestTimestamp on every half bit; no refresh means it stopped
+        if ((long)(newTs - reqts) > (long)TX_STALL_TIMEOUT_US) {
+            if (txTimer != NULL)
+                gptimer_stop(txTimer);
+            setIdleState();
+            txIndex = 0;
+            txStatus = OpenThermTxStatus::IDLE;
+            responseStatus = OpenThermResponseStatus::TIMEOUT;
+            processResponse();
+        }
+#endif
+        break;
+
+    case OpenThermTxStatus::IDLE:
     case OpenThermTxStatus::WAIT_RESPONSE:
         break;
     }
+
+    // keep delayTimestamp close to micros(): isReady() compares against it with a 2^31 us window,
+    // and it is only moved on a valid frame, so after 2^31 us (about 35.8 min) without one the
+    // elapsed delay would look like a delay in the future again for the next 2^31 us
+    if ((long)(newTs - delayTimestamp) > 0)
+        delayTimestamp = newTs;
 
     if (isSlave && ((newTs - ts) > 1250000)) {
         rxIdleLevel = false;
@@ -631,7 +653,10 @@ void OpenTherm::end()
         gptimer_del_timer(txTimer);
         txTimer = NULL;
     }
+    txIndex = 0;
 #endif
+    // after the tx timer is stopped, so a frame cut off here does not leave the line in TX_DATA
+    txStatus = OpenThermTxStatus::IDLE;
 }
 
 OpenTherm::~OpenTherm()
